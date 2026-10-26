@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import Redesign from "@/components/Redesign";
 import RedesignBold from "@/components/RedesignBold";
 import RedesignTrade from "@/components/RedesignTrade";
+import RedesignElegant from "@/components/RedesignElegant";
+import RedesignFriendly from "@/components/RedesignFriendly";
 import { buildOutreach } from "@/lib/outreach";
 import type { BusinessData, Lead, LeadStatus } from "@/lib/types";
 
@@ -22,6 +24,11 @@ export default function Home() {
   const [filter, setFilter] = useState<"all" | "none" | "has">("all");
   const [catFilter, setCatFilter] = useState("all");
   const [sort, setSort] = useState<"hot" | "az" | "cat">("hot");
+  // dedupe across searches: leadId -> the area it was first found in
+  const [seen, setSeen] = useState<Record<string, string>>({});
+  const [seenElsewhere, setSeenElsewhere] = useState<Record<string, string>>({});
+  const [hideDupes, setHideDupes] = useState(false);
+  useEffect(() => { try { const s = localStorage.getItem("lsr-seen"); if (s) setSeen(JSON.parse(s)); } catch {} }, []);
 
   // lead pipeline (persisted) — stores the full lead so it survives across town searches
   type Saved = { lead: Lead; status: LeadStatus; notes: string };
@@ -45,7 +52,9 @@ export default function Home() {
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeErr, setScrapeErr] = useState("");
   const [view, setView] = useState<"after" | "before">("after");
-  const [template, setTemplate] = useState<"clean" | "bold" | "trade">("clean");
+  const [template, setTemplate] = useState<"clean" | "bold" | "trade" | "elegant" | "friendly">("clean");
+  const [beforeMode, setBeforeMode] = useState<"shot" | "live">("shot");
+  const [shotKey, setShotKey] = useState(0);
 
   // outreach
   const [oBiz, setOBiz] = useState("");
@@ -64,6 +73,17 @@ export default function Home() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Search failed");
       setLeads(j.leads); setArea(j.area);
+      // record which of these were already found in a *different* town search
+      const here = String(j.area).split(",").slice(0, 2).join(",").trim();
+      const elsewhere: Record<string, string> = {};
+      const next = { ...seen };
+      for (const l of j.leads as Lead[]) {
+        const id = leadId(l);
+        if (next[id] && next[id] !== here) elsewhere[id] = next[id];
+        else if (!next[id]) next[id] = here;
+      }
+      setSeenElsewhere(elsewhere); setSeen(next);
+      try { localStorage.setItem("lsr-seen", JSON.stringify(next)); } catch {}
     } catch (e) { setLeadErr(e instanceof Error ? e.message : "Search failed"); }
     finally { setLeadLoading(false); }
   }
@@ -132,6 +152,7 @@ export default function Home() {
   const shown = (leads ?? [])
     .filter((l) => filter === "all" ? true : filter === "none" ? !l.website : !!l.website)
     .filter((l) => catFilter === "all" || l.category === catFilter)
+    .filter((l) => !hideDupes || !seenElsewhere[leadId(l)])
     .sort((a, b) =>
       sort === "az" ? a.name.localeCompare(b.name)
       : sort === "cat" ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name)
@@ -173,6 +194,11 @@ export default function Home() {
                   <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All</button>
                   <button className={filter === "none" ? "on" : ""} onClick={() => setFilter("none")}>🔥 No website</button>
                   <button className={filter === "has" ? "on" : ""} onClick={() => setFilter("has")}>Has website</button>
+                  {Object.keys(seenElsewhere).length > 0 && (
+                    <button className={hideDupes ? "on" : ""} onClick={() => setHideDupes((v) => !v)} title="Hide businesses already found in another town search">
+                      {hideDupes ? "Showing new only" : `Hide ${Object.keys(seenElsewhere).length} dupes`}
+                    </button>
+                  )}
                   <select className="sel" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
                     <option value="all">All categories</option>
                     {cats.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -193,7 +219,7 @@ export default function Home() {
                     <div className="lead" key={id}>
                       <div className="lead-row">
                         <div className="lead-main">
-                          <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>} {saved[id] && <span className="saved" title="In your pipeline">★</span>}</div>
+                          <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>} {saved[id] && <span className="saved" title="In your pipeline">★</span>} {seenElsewhere[id] && <span className="dupe" title="Already found in another search">↺ also in {seenElsewhere[id]}</span>}</div>
                           <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}</div>
                         </div>
                         <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(l, { status: e.target.value as LeadStatus })}>
@@ -245,6 +271,8 @@ export default function Home() {
                     <button className={template === "clean" ? "on" : ""} onClick={() => setTemplate("clean")}>Clean</button>
                     <button className={template === "bold" ? "on" : ""} onClick={() => setTemplate("bold")}>Bold</button>
                     <button className={template === "trade" ? "on" : ""} onClick={() => setTemplate("trade")}>Trade</button>
+                    <button className={template === "elegant" ? "on" : ""} onClick={() => setTemplate("elegant")}>Elegant</button>
+                    <button className={template === "friendly" ? "on" : ""} onClick={() => setTemplate("friendly")}>Friendly</button>
                   </div>
                   <button className="mini" onClick={() => setEditing((v) => !v)}>{editing ? "Done editing" : "✎ Edit"}</button>
                   <button className="mini" onClick={downloadHtml}>⇩ Download HTML</button>
@@ -265,11 +293,29 @@ export default function Home() {
                 <div className="chrome"><span /><span /><span /><div className="addr">{view === "after" ? "your-new-site.com" : d.domain}</div></div>
                 <div className="screen">
                   {view === "after"
-                    ? (template === "bold" ? <RedesignBold d={d} /> : template === "trade" ? <RedesignTrade d={d} /> : <Redesign d={d} />)
-                    : <iframe src={d.url} title="original" sandbox="allow-same-origin allow-scripts" />}
+                    ? (template === "bold" ? <RedesignBold d={d} />
+                      : template === "trade" ? <RedesignTrade d={d} />
+                      : template === "elegant" ? <RedesignElegant d={d} />
+                      : template === "friendly" ? <RedesignFriendly d={d} />
+                      : <Redesign d={d} />)
+                    : beforeMode === "shot"
+                      ? <img className="shot" key={shotKey} alt={`Screenshot of ${d.domain}`}
+                          src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(d.url)}?w=1280&h=1600${shotKey ? `&r=${shotKey}` : ""}`} />
+                      : <iframe src={d.url} title="original" sandbox="allow-same-origin allow-scripts" />}
                 </div>
               </div>
-              {view === "before" && <p className="muted small">Some sites block being embedded — a blank “before” is the original site refusing to load in a frame, not a bug.</p>}
+              {view === "before" && (
+                <div className="before-bar">
+                  <div className="seg sm">
+                    <button className={beforeMode === "shot" ? "on" : ""} onClick={() => setBeforeMode("shot")}>Screenshot</button>
+                    <button className={beforeMode === "live" ? "on" : ""} onClick={() => setBeforeMode("live")}>Live</button>
+                  </div>
+                  {beforeMode === "shot"
+                    ? <><span className="muted small">Screenshots are generated on first view — if you see a placeholder, give it a few seconds and refresh.</span>
+                        <button className="mini" onClick={() => setShotKey(Date.now())}>↻ Refresh</button></>
+                    : <span className="muted small">Live view — some sites block embedding; a blank frame means the site refused, so use Screenshot.</span>}
+                </div>
+              )}
             </>
           )}
         </section>
@@ -425,6 +471,9 @@ button.primary:disabled{opacity:.6}
 .chrome .addr{margin-left:12px;background:#fff;border-radius:6px;padding:4px 12px;font-size:12px;color:#5b6675;flex:1;max-width:340px}
 .screen{height:70vh;overflow:auto;background:#fff}
 .screen iframe{width:100%;height:100%;border:0}
+.screen .shot{display:block;width:100%;height:auto;min-height:300px;background:#f2f4f7}
+.before-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
+.dupe{color:#a99cf0;font-size:11px;font-weight:600;border:1px solid #3e3770;border-radius:999px;padding:1px 8px;margin-left:4px;vertical-align:middle}
 .ogrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .ogrid label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#9fb0c3;font-weight:600}
 .toggle{display:flex;align-items:center;gap:8px;color:#cdd8e5;font-size:14px;margin-bottom:18px;cursor:pointer}

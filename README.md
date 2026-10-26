@@ -40,6 +40,15 @@ business. It adapts automatically:
   HTTPS, not mobile-friendly, outdated HTML, weak SEO, no social) to use as ammo.
 - **Editable redesign** — tweak the business name, tagline, brand color, and services before
   you send it.
+- **Five templates** — Clean, Bold, Trade (plumbers/contractors), Elegant (salons, boutiques,
+  fine dining), and Friendly (cafés, bakeries, pet groomers). Switch with one click.
+- **Screenshot "before"** — shows a real screenshot of the original site, so the
+  before/after works even when a site blocks embedding (a Live toggle is there too).
+- **Owner-email finder** — collects every email on the site and follows the Contact page
+  when the homepage has none.
+- **Dedupe across searches** — leads you already found in another town get an
+  "also in …" badge, with a one-click "hide dupes" filter. Filter by category and sort too.
+- **My Leads pipeline** — every lead you've touched, across all searches, in one place.
 - **Download the redesign** as a self-contained `.html` file — the asset you hand the owner.
 
 ---
@@ -93,9 +102,9 @@ src/
 
 ## Notes & limitations
 
-- **"Before" previews** load the original site in an iframe. Some sites set
-  `X-Frame-Options` and refuse to embed — that's the site blocking frames, not a bug. A
-  screenshot-based fallback is a planned enhancement.
+- **"Before" screenshots** come from WordPress's free mShots service. The first request for a
+  site can return a placeholder while it renders — hit Refresh after a few seconds. The Live
+  view embeds the real site, which some sites block via `X-Frame-Options`.
 - Overpass can be slow under load; results are cached per town for 30 minutes.
 - OpenStreetMap coverage of small businesses varies by area — great in towns, patchy in
   very rural spots.
