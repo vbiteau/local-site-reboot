@@ -13,7 +13,7 @@ function abs(base: string, href?: string): string | undefined {
   }
 }
 
-const NAV_SKIP = /^(home|about|about us|contact|contact us|menu|gallery|blog|news|login|sign in|cart|search|privacy|terms|faq)$/i;
+const NAV_SKIP = /^(home|about|about us|our story|contact|contact us|get in touch|menu|gallery|photos|blog|news|login|log in|sign in|sign up|register|cart|checkout|search|privacy|privacy policy|terms|faq|faqs|reviews|testimonials|hours|location|locations|directions|pricing|prices|order|order online|order now|book|book now|book online|reserve|subscribe|newsletter|welcome|get started|more|learn more|shop|store|products|services|portfolio|careers|jobs|events)$/i;
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js)$|^[0-9]|sentry|example\.com|wixpress|@sentry|godaddy|squarespace|\.wix/i;
 
@@ -76,15 +76,18 @@ export async function extractSite(input: string): Promise<BusinessData> {
   const meta = (sel: string) => $(sel).attr("content")?.trim() || undefined;
   const text = (sel: string) => $(sel).first().text().trim() || undefined;
 
-  // name
+  // name — the title's first segment is usually the business name; the h1 is usually a headline
+  const titleName = ($("title").text().split(/[|\-–—:·•]/)[0] || "").trim().replace(/^welcome to\s+/i, "");
+  const h1 = text("h1"), h2 = text("h2");
   base.name =
     meta('meta[property="og:site_name"]') ||
-    (text("h1") && text("h1")!.length < 60 ? text("h1") : undefined) ||
-    ($("title").text().split(/[|\-–—:·]/)[0] || "").trim() ||
+    (titleName && titleName.length >= 2 && titleName.length < 50 ? titleName : undefined) ||
+    (h1 && h1.length < 40 ? h1 : undefined) ||
     domain;
 
-  // tagline / description
-  base.tagline = (text("h1") && text("h1") !== base.name ? text("h1") : undefined) || text("h2");
+  // tagline / description — the h1 headline, if it reads like a tagline (not the name)
+  const looksTagline = (s?: string) => !!s && s !== base.name && !NAV_SKIP.test(s) && s.length <= 90 && (s.includes(" ") || s.length >= 12);
+  base.tagline = looksTagline(h1) ? h1 : looksTagline(h2) ? h2 : undefined;
   base.description = meta('meta[name="description"]') || meta('meta[property="og:description"]');
 
   // brand color
@@ -98,19 +101,25 @@ export async function extractSite(input: string): Promise<BusinessData> {
     abs(base.url, $('link[rel="apple-touch-icon"]').attr("href")) ||
     abs(base.url, $('link[rel~="icon"]').attr("href"));
 
-  // hero + images
-  base.heroImage = abs(base.url, meta('meta[property="og:image"]'));
+  // hero + images — score candidates: prefer big images inside hero/banner/header areas
+  const ogImg = abs(base.url, meta('meta[property="og:image"]'));
   const imgs = new Set<string>();
-  if (base.heroImage) imgs.add(base.heroImage);
+  const cands: { src: string; score: number }[] = [];
   $("img").each((_, el) => {
-    const src = abs(base.url, $(el).attr("src") || $(el).attr("data-src"));
+    const $el = $(el);
+    const src = abs(base.url, $el.attr("src") || $el.attr("data-src"));
     if (!src) return;
-    if (/\.(svg)$/i.test(src)) return;
-    if (/sprite|icon|pixel|spacer|blank|1x1/i.test(src)) return;
+    if (/\.svg($|\?)/i.test(src)) return;
+    const hint = (($el.attr("alt") || "") + " " + src).toLowerCase();
+    if (/sprite|icon|pixel|spacer|blank|1x1|logo|favicon|avatar|badge/.test(hint)) return;
     imgs.add(src);
+    const w = parseInt($el.attr("width") || "0", 10) || 0;
+    const inHero = $el.closest('header,.hero,[class*="hero" i],[class*="banner" i],[class*="jumbo" i],[id*="hero" i]').length > 0;
+    cands.push({ src, score: (inHero ? 5000 : 0) + w });
   });
+  cands.sort((a, b) => b.score - a.score);
   base.images = [...imgs].slice(0, 12);
-  if (!base.heroImage && base.images.length) base.heroImage = base.images[0];
+  base.heroImage = ogImg || cands[0]?.src;
 
   // nav items
   const nav = new Set<string>();
@@ -120,14 +129,20 @@ export async function extractSite(input: string): Promise<BusinessData> {
   });
   base.nav = [...nav].slice(0, 8);
 
-  // services: headings + non-boilerplate nav items
-  const services = new Set<string>();
-  $("h2, h3").each((_, el) => {
-    const t = $(el).text().trim().replace(/\s+/g, " ");
-    if (t && t.length >= 3 && t.length <= 40 && !NAV_SKIP.test(t)) services.add(t);
-  });
-  for (const n of base.nav) if (!NAV_SKIP.test(n)) services.add(n);
-  base.services = [...services].slice(0, 6);
+  // services: headings + non-boilerplate nav items, deduped case-insensitively
+  const services: string[] = [];
+  const seenSvc = new Set<string>();
+  const addSvc = (t?: string) => {
+    if (!t) return;
+    t = t.replace(/\s+/g, " ").trim();
+    const key = t.toLowerCase();
+    if (t.length < 3 || t.length > 40 || NAV_SKIP.test(t) || seenSvc.has(key)) return;
+    if (!/[a-z]/i.test(t)) return;                 // skip symbol/number-only
+    seenSvc.add(key); services.push(t);
+  };
+  $("h2, h3").each((_, el) => addSvc($(el).text()));
+  for (const n of base.nav) addSvc(n);
+  base.services = services.slice(0, 6);
 
   // contact
   const bodyText = $("body").text().replace(/\s+/g, " ");
