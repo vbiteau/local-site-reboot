@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Redesign from "@/components/Redesign";
+import RedesignBold from "@/components/RedesignBold";
 import { buildOutreach } from "@/lib/outreach";
 import type { BusinessData, Lead, LeadStatus } from "@/lib/types";
 
@@ -39,6 +40,7 @@ export default function Home() {
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeErr, setScrapeErr] = useState("");
   const [view, setView] = useState<"after" | "before">("after");
+  const [template, setTemplate] = useState<"clean" | "bold">("clean");
 
   // outreach
   const [oBiz, setOBiz] = useState("");
@@ -211,6 +213,10 @@ export default function Home() {
                   <button className={view === "before" ? "on" : ""} onClick={() => setView("before")}>Before</button>
                 </div>
                 <div className="vb-right">
+                  <div className="seg sm">
+                    <button className={template === "clean" ? "on" : ""} onClick={() => setTemplate("clean")}>Clean</button>
+                    <button className={template === "bold" ? "on" : ""} onClick={() => setTemplate("bold")}>Bold</button>
+                  </div>
                   <button className="mini" onClick={() => setEditing((v) => !v)}>{editing ? "Done editing" : "✎ Edit"}</button>
                   <button className="mini" onClick={downloadHtml}>⇩ Download HTML</button>
                   <button className="mini" onClick={() => { setOBiz(d.name); setONoSite(false); setTab("outreach"); }}>Outreach →</button>
@@ -230,7 +236,7 @@ export default function Home() {
                 <div className="chrome"><span /><span /><span /><div className="addr">{view === "after" ? "your-new-site.com" : d.domain}</div></div>
                 <div className="screen">
                   {view === "after"
-                    ? <Redesign d={d} />
+                    ? (template === "bold" ? <RedesignBold d={d} /> : <Redesign d={d} />)
                     : <iframe src={d.url} title="original" sandbox="allow-same-origin allow-scripts" />}
                 </div>
               </div>
@@ -317,6 +323,7 @@ button.primary:disabled{opacity:.6}
 .seg{display:flex;background:#0e1420;border:1px solid #243149;border-radius:9px;overflow:hidden}
 .seg button{background:transparent;border:0;color:#9fb0c3;padding:9px 16px;font-weight:600;cursor:pointer;font-size:14px}
 .seg button.on{background:#2f6df6;color:#fff}
+.seg.sm button{padding:7px 12px;font-size:12px}
 .editor{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#0e1420;border:1px solid #1b2433;border-radius:11px;padding:14px;margin-bottom:12px}
 .editor label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#9fb0c3;font-weight:600}
 .editor label.wide{grid-column:1/-1}
