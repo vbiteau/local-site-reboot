@@ -156,7 +156,8 @@ export async function extractSite(input: string): Promise<BusinessData> {
     bodyText.match(/\d{1,5}\s+[A-Za-z0-9.\s]{3,40},?\s+[A-Za-z\s]{2,20},?\s+[A-Z]{2}\s+\d{5}/)?.[0];
 
   // hours (best effort)
-  const hoursMatch = bodyText.match(/(mon|tue|wed|thu|fri|sat|sun)[a-z]*[\s:.-]+.{0,30}?\d{1,2}(:\d{2})?\s?(am|pm)/gi);
+  // capture full ranges like "Tue-Sat 6:00 am - 2:00 pm", not just the opening time
+  const hoursMatch = bodyText.match(/(mon|tue|wed|thu|fri|sat|sun)[a-z]*[\s:.-]+.{0,30}?\d{1,2}(:\d{2})?\s?(am|pm)(\s*(?:-|–|to)\s*\d{1,2}(:\d{2})?\s?(am|pm))?/gi);
   if (hoursMatch) base.hours = [...new Set(hoursMatch.map((h) => h.trim()))].slice(0, 7);
 
   // socials
