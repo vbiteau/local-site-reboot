@@ -28,8 +28,19 @@ the original in a **before / after** view.
 **3 · Outreach**
 Generates a ready-to-send cold **email + text message** to the owner, personalized to the
 business. It adapts automatically:
-- *Has a site* → "I rebuilt your website as a modern version — free preview."
+- *Has a site* → "I rebuilt your website as a modern version — free preview." (and weaves in
+  a real issue found on their current site)
 - *No site* → "I noticed you don't have a website yet — here's one I can build you."
+
+### Also built in
+
+- **Lead pipeline / CRM** — mark each lead's status (new → contacted → interested → won /
+  dead), add notes, and it all persists locally. **Export your list to CSV.**
+- **Pitch-strength signals** — the scraper flags concrete reasons a site needs help (no
+  HTTPS, not mobile-friendly, outdated HTML, weak SEO, no social) to use as ammo.
+- **Editable redesign** — tweak the business name, tagline, brand color, and services before
+  you send it.
+- **Download the redesign** as a self-contained `.html` file — the asset you hand the owner.
 
 ---
 
