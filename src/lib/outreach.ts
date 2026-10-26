@@ -4,6 +4,7 @@ export type OutreachInput = {
   yourPhone?: string;
   previewUrl?: string;
   noSite: boolean;       // true = they have no website (cold "new site" pitch)
+  signal?: string;       // a concrete issue with their current site, woven into the pitch
 };
 
 export type Outreach = { subject: string; email: string; sms: string };
@@ -33,12 +34,16 @@ ${name}${phone}`,
     };
   }
 
+  const signalLine = i.signal
+    ? ` I noticed your current site ${i.signal.charAt(0).toLowerCase() + i.signal.slice(1)}, so I`
+    : " I";
+
   return {
     subject: `Made ${b} a new website — free preview`,
     email:
 `Hi,
 
-I'm ${name}, a local web designer. I'm a fan of ${b}, and I took the liberty of rebuilding your website as a modern, mobile-friendly version — faster, cleaner, and easier for customers to use on their phones.${preview}
+I'm ${name}, a local web designer. I'm a fan of ${b}, and${signalLine} rebuilt your website as a modern, mobile-friendly version — faster, cleaner, and easier for customers to use on their phones.${preview}
 
 There's no cost to look, and nothing changes on your end unless you love it. If you do, I can have the new site live for you quickly.
 

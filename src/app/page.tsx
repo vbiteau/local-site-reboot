@@ -1,8 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Redesign from "@/components/Redesign";
 import { buildOutreach } from "@/lib/outreach";
-import type { BusinessData, Lead } from "@/lib/types";
+import type { BusinessData, Lead, LeadStatus } from "@/lib/types";
+
+const STATUSES: LeadStatus[] = ["new", "contacted", "interested", "won", "dead"];
+const leadId = (l: Lead) => (l.name + "|" + (l.address || "")).toLowerCase();
 
 export default function Home() {
   const [tab, setTab] = useState<"leads" | "redesign" | "outreach">("leads");
@@ -16,9 +19,23 @@ export default function Home() {
   const [leadErr, setLeadErr] = useState("");
   const [filter, setFilter] = useState<"all" | "none" | "has">("all");
 
+  // lead pipeline (persisted)
+  const [saved, setSaved] = useState<Record<string, { status: LeadStatus; notes: string }>>({});
+  useEffect(() => { try { const s = localStorage.getItem("lsr-leads"); if (s) setSaved(JSON.parse(s)); } catch {} }, []);
+  function setLead(id: string, patch: Partial<{ status: LeadStatus; notes: string }>) {
+    setSaved((prev) => {
+      const cur = prev[id] || { status: "new" as LeadStatus, notes: "" };
+      const next = { ...prev, [id]: { ...cur, ...patch } };
+      try { localStorage.setItem("lsr-leads", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
   // redesign
   const [url, setUrl] = useState("");
   const [data, setData] = useState<BusinessData | null>(null);
+  const [edits, setEdits] = useState<Partial<BusinessData>>({});
+  const [editing, setEditing] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeErr, setScrapeErr] = useState("");
   const [view, setView] = useState<"after" | "before">("after");
@@ -47,7 +64,7 @@ export default function Home() {
   async function generate(target?: string) {
     const u = (target ?? url).trim();
     if (!u) return;
-    setUrl(u); setTab("redesign"); setScrapeLoading(true); setScrapeErr(""); setData(null); setView("after");
+    setUrl(u); setTab("redesign"); setScrapeLoading(true); setScrapeErr(""); setData(null); setEdits({}); setEditing(false); setView("after");
     try {
       const r = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
       const j = await r.json();
@@ -57,16 +74,52 @@ export default function Home() {
     finally { setScrapeLoading(false); }
   }
 
-  function pitchNew(l: Lead) {
-    setOBiz(l.name); setONoSite(true); setOPreview(""); setTab("outreach");
-  }
+  function pitchNew(l: Lead) { setOBiz(l.name); setONoSite(true); setOPreview(""); setTab("outreach"); }
   function copy(label: string, txt: string) {
     navigator.clipboard?.writeText(txt).then(() => { setCopied(label); setTimeout(() => setCopied(""), 1500); });
   }
 
+  // merged data for the preview (edits override the scrape)
+  const d: BusinessData | null = data ? {
+    ...data,
+    name: edits.name ?? data.name,
+    tagline: edits.tagline ?? data.tagline,
+    color: edits.color ?? data.color,
+    description: edits.description ?? data.description,
+    services: edits.services ?? data.services,
+  } : null;
+
+  function downloadHtml() {
+    const node = document.querySelector(".rd");
+    if (!node || !d) return;
+    const doc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(d.name)}</title></head><body style="margin:0">${node.outerHTML}</body></html>`;
+    const blob = new Blob([doc], { type: "text/html" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(d.domain || "site").replace(/[^a-z0-9.-]/gi, "_")}-redesign.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function exportCsv() {
+    if (!leads) return;
+    const rows = [["name", "category", "website", "phone", "address", "status", "notes"]];
+    for (const l of leads) {
+      const s = saved[leadId(l)] || { status: "new", notes: "" };
+      rows.push([l.name, l.category, l.website || "", l.phone || "", l.address || "", s.status, s.notes]);
+    }
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `leads-${(area.split(",")[0] || "export").trim().replace(/\s+/g, "-").toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   const shown = leads?.filter((l) => filter === "all" ? true : filter === "none" ? !l.website : !!l.website) ?? [];
   const hot = leads?.filter((l) => !l.website).length ?? 0;
-  const mail = buildOutreach({ business: oBiz, yourName: oName, yourPhone: oPhone, previewUrl: oPreview, noSite: oNoSite });
+  const mail = buildOutreach({ business: oBiz, yourName: oName, yourPhone: oPhone, previewUrl: oPreview, noSite: oNoSite, signal: !oNoSite ? d?.signals?.[0] : undefined });
 
   return (
     <main className="app">
@@ -82,7 +135,7 @@ export default function Home() {
       {tab === "leads" && (
         <section className="panel">
           <h1>Find local businesses to pitch</h1>
-          <p className="sub">Enter a town and state. Businesses with <b>no website</b> are your hottest leads — pitch them a brand-new site. Ones with a dated site are redesign candidates.</p>
+          <p className="sub">Enter a town and state. Businesses with <b>no website</b> are your hottest leads — pitch them a brand-new site. Track each one and export your list.</p>
           <form className="row" onSubmit={search}>
             <input placeholder="Town / city (e.g. Scranton)" value={city} onChange={(e) => setCity(e.target.value)} />
             <input placeholder="State (e.g. PA)" value={stateAbbr} onChange={(e) => setStateAbbr(e.target.value)} style={{ maxWidth: 140 }} />
@@ -94,25 +147,36 @@ export default function Home() {
           {leads && (
             <>
               <div className="bar">
-                <span className="muted">{leads.length} businesses in <b>{area.split(",").slice(0, 2).join(",")}</b> · <b style={{ color: "#f97316" }}>{hot} with no website</b></span>
+                <span className="muted">{leads.length} in <b>{area.split(",").slice(0, 2).join(",")}</b> · <b style={{ color: "#f97316" }}>{hot} no website</b></span>
                 <div className="chips">
                   <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All</button>
                   <button className={filter === "none" ? "on" : ""} onClick={() => setFilter("none")}>🔥 No website</button>
                   <button className={filter === "has" ? "on" : ""} onClick={() => setFilter("has")}>Has website</button>
+                  <button className="csv" onClick={exportCsv}>⇩ CSV</button>
                 </div>
               </div>
               <div className="leads">
-                {shown.map((l, i) => (
-                  <div className="lead" key={i}>
-                    <div className="lead-main">
-                      <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>}</div>
-                      <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}</div>
+                {shown.map((l) => {
+                  const id = leadId(l);
+                  const s = saved[id] || { status: "new" as LeadStatus, notes: "" };
+                  return (
+                    <div className="lead" key={id}>
+                      <div className="lead-row">
+                        <div className="lead-main">
+                          <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>}</div>
+                          <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}</div>
+                        </div>
+                        <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(id, { status: e.target.value as LeadStatus })}>
+                          {STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                        {l.website
+                          ? <button className="mini" onClick={() => generate(l.website)}>Redesign ↗</button>
+                          : <button className="mini warn" onClick={() => pitchNew(l)}>Pitch ✎</button>}
+                      </div>
+                      <input className="note" placeholder="notes…" value={s.notes} onChange={(e) => setLead(id, { notes: e.target.value })} />
                     </div>
-                    {l.website
-                      ? <button className="mini" onClick={() => generate(l.website)}>Redesign ↗</button>
-                      : <button className="mini warn" onClick={() => pitchNew(l)}>Pitch new site ✎</button>}
-                  </div>
-                ))}
+                  );
+                })}
                 {shown.length === 0 && <p className="muted">No businesses match this filter.</p>}
               </div>
             </>
@@ -130,28 +194,47 @@ export default function Home() {
           {scrapeErr && <p className="err">{scrapeErr}</p>}
           {scrapeLoading && <p className="muted">Fetching the site and rebuilding it…</p>}
 
-          {data && (
+          {d && (
             <>
-              {!data.fetchedOk && <p className="err">Heads up: {data.note || "couldn't fully read the site"} — the redesign below uses whatever was found.</p>}
+              {!data?.fetchedOk && <p className="err">Heads up: {data?.note || "couldn't fully read the site"} — the redesign below uses whatever was found.</p>}
+
+              {d.signals.length > 0 && (
+                <div className="signals">
+                  <b>Why it needs a redesign</b>
+                  <ul>{d.signals.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                </div>
+              )}
+
               <div className="viewbar">
                 <div className="seg">
-                  <button className={view === "after" ? "on" : ""} onClick={() => setView("after")}>✨ After (new)</button>
-                  <button className={view === "before" ? "on" : ""} onClick={() => setView("before")}>Before (original)</button>
+                  <button className={view === "after" ? "on" : ""} onClick={() => setView("after")}>✨ After</button>
+                  <button className={view === "before" ? "on" : ""} onClick={() => setView("before")}>Before</button>
                 </div>
                 <div className="vb-right">
-                  <span className="muted">{data.name} · {data.domain}</span>
-                  <button className="mini" onClick={() => { setOBiz(data.name); setONoSite(false); setTab("outreach"); }}>Write outreach →</button>
+                  <button className="mini" onClick={() => setEditing((v) => !v)}>{editing ? "Done editing" : "✎ Edit"}</button>
+                  <button className="mini" onClick={downloadHtml}>⇩ Download HTML</button>
+                  <button className="mini" onClick={() => { setOBiz(d.name); setONoSite(false); setTab("outreach"); }}>Outreach →</button>
                 </div>
               </div>
+
+              {editing && (
+                <div className="editor">
+                  <label>Name<input value={d.name} onChange={(e) => setEdits({ ...edits, name: e.target.value })} /></label>
+                  <label>Tagline<input value={d.tagline || ""} onChange={(e) => setEdits({ ...edits, tagline: e.target.value })} /></label>
+                  <label>Brand color<input type="color" value={/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2563eb"} onChange={(e) => setEdits({ ...edits, color: e.target.value })} /></label>
+                  <label className="wide">Services (comma-separated)<input value={d.services.join(", ")} onChange={(e) => setEdits({ ...edits, services: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>
+                </div>
+              )}
+
               <div className="frame">
-                <div className="chrome"><span /><span /><span /><div className="addr">{view === "after" ? "your-new-site.com" : data.domain}</div></div>
+                <div className="chrome"><span /><span /><span /><div className="addr">{view === "after" ? "your-new-site.com" : d.domain}</div></div>
                 <div className="screen">
                   {view === "after"
-                    ? <Redesign d={data} />
-                    : <iframe src={data.url} title="original" sandbox="allow-same-origin allow-scripts" />}
+                    ? <Redesign d={d} />
+                    : <iframe src={d.url} title="original" sandbox="allow-same-origin allow-scripts" />}
                 </div>
               </div>
-              {view === "before" && <p className="muted small">Some sites block being embedded — if the “before” is blank, that’s the original site refusing to load in a frame, not a bug.</p>}
+              {view === "before" && <p className="muted small">Some sites block being embedded — a blank “before” is the original site refusing to load in a frame, not a bug.</p>}
             </>
           )}
         </section>
@@ -160,7 +243,7 @@ export default function Home() {
       {tab === "outreach" && (
         <section className="panel">
           <h1>Outreach to the owner</h1>
-          <p className="sub">A ready-to-send cold email + text, personalized to the business. Fill in your details and copy.</p>
+          <p className="sub">A ready-to-send cold email + text, personalized to the business{!oNoSite && d?.signals?.[0] ? " (and the issue found on their current site)" : ""}.</p>
           <div className="ogrid">
             <label>Business<input value={oBiz} onChange={(e) => setOBiz(e.target.value)} placeholder="Joe's Pizza" /></label>
             <label>Your name<input value={oName} onChange={(e) => setOName(e.target.value)} placeholder="Alex" /></label>
@@ -185,6 +268,8 @@ export default function Home() {
   );
 }
 
+function escapeHtml(s: string) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
+
 const appCss = `
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -197,9 +282,10 @@ body{margin:0}
 .tabs button.on{background:#13203a;color:#fff;border-color:#2f4a7a}
 .panel{max-width:960px;margin:0 auto;padding:34px 22px}
 h1{font-size:28px;letter-spacing:-.02em;margin:0 0 8px}
-.sub{color:#9fb0c3;margin:0 0 22px;max-width:640px;line-height:1.55}
+.sub{color:#9fb0c3;margin:0 0 22px;max-width:660px;line-height:1.55}
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
-input{flex:1;min-width:180px;background:#0e1420;border:1px solid #243149;color:#e6edf6;border-radius:9px;padding:11px 13px;font-size:15px}
+input,select{background:#0e1420;border:1px solid #243149;color:#e6edf6;border-radius:9px;padding:10px 12px;font-size:15px;font-family:inherit}
+.row input{flex:1;min-width:180px}
 input::placeholder{color:#5e708a}
 button.primary{background:#2f6df6;color:#fff;border:0;border-radius:9px;padding:11px 20px;font-weight:700;cursor:pointer;font-size:15px}
 button.primary:disabled{opacity:.6}
@@ -209,31 +295,45 @@ button.primary:disabled{opacity:.6}
 .chips{display:flex;gap:6px}
 .chips button{background:#0e1420;border:1px solid #243149;color:#9fb0c3;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer}
 .chips button.on{background:#13203a;color:#fff;border-color:#2f4a7a}
+.chips button.csv{color:#9bd3b0;border-color:#285c3e}
 .leads{display:grid;gap:8px}
-.lead{display:flex;align-items:center;justify-content:space-between;gap:14px;background:#0e1420;border:1px solid #1b2433;border-radius:11px;padding:13px 16px}
+.lead{background:#0e1420;border:1px solid #1b2433;border-radius:11px;padding:11px 14px}
+.lead-row{display:flex;align-items:center;gap:12px}
+.lead-main{flex:1;min-width:0}
 .lead-name{font-weight:600}
 .hot{background:#f97316;color:#1a0f00;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;margin-left:8px;vertical-align:middle}
-.lead-meta{color:#7f92a8;font-size:13px;margin-top:3px}
-.mini{background:#1a2b4d;color:#bcd4ff;border:1px solid #2f4a7a;border-radius:8px;padding:8px 13px;font-weight:600;cursor:pointer;font-size:13px;white-space:nowrap}
+.lead-meta{color:#7f92a8;font-size:13px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat{padding:6px 8px;font-size:12px;font-weight:700;border-radius:8px;text-transform:capitalize;cursor:pointer}
+.stat-new{color:#9fb0c3}.stat-contacted{color:#6fb3ff;border-color:#2f4a7a}.stat-interested{color:#f2c14e;border-color:#6a561f}
+.stat-won{color:#7ee0a6;border-color:#285c3e}.stat-dead{color:#8698ad;opacity:.6}
+.mini{background:#1a2b4d;color:#bcd4ff;border:1px solid #2f4a7a;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer;font-size:13px;white-space:nowrap}
 .mini.warn{background:#3a2a12;color:#f0bd7f;border-color:#6a4a1f}
-.viewbar{display:flex;align-items:center;justify-content:space-between;margin:18px 0 12px;flex-wrap:wrap;gap:10px}
-.vb-right{display:flex;align-items:center;gap:12px}
+.note{width:100%;margin-top:8px;background:#0b111c;border:1px dashed #243149;font-size:13px;padding:7px 10px}
+.signals{background:#2a1512;border:1px solid #5a2f28;border-radius:11px;padding:12px 16px;margin-bottom:14px}
+.signals b{color:#ff9d7a;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.signals ul{margin:8px 0 0;padding-left:18px;color:#f0c7b8;font-size:14px;line-height:1.6}
+.viewbar{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px;flex-wrap:wrap;gap:10px}
+.vb-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .seg{display:flex;background:#0e1420;border:1px solid #243149;border-radius:9px;overflow:hidden}
 .seg button{background:transparent;border:0;color:#9fb0c3;padding:9px 16px;font-weight:600;cursor:pointer;font-size:14px}
 .seg button.on{background:#2f6df6;color:#fff}
+.editor{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#0e1420;border:1px solid #1b2433;border-radius:11px;padding:14px;margin-bottom:12px}
+.editor label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#9fb0c3;font-weight:600}
+.editor label.wide{grid-column:1/-1}
+.editor input[type=color]{height:38px;padding:3px;width:60px}
 .frame{border:1px solid #243149;border-radius:14px;overflow:hidden;background:#fff}
 .chrome{display:flex;align-items:center;gap:7px;background:#e9edf3;padding:10px 14px;border-bottom:1px solid #d7dde6}
 .chrome>span{width:11px;height:11px;border-radius:50%;background:#c3cbd6}
 .chrome .addr{margin-left:12px;background:#fff;border-radius:6px;padding:4px 12px;font-size:12px;color:#5b6675;flex:1;max-width:340px}
-.screen{height:72vh;overflow:auto;background:#fff}
+.screen{height:70vh;overflow:auto;background:#fff}
 .screen iframe{width:100%;height:100%;border:0}
 .ogrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .ogrid label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#9fb0c3;font-weight:600}
 .toggle{display:flex;align-items:center;gap:8px;color:#cdd8e5;font-size:14px;margin-bottom:18px;cursor:pointer}
-.toggle input{flex:none;width:auto;min-width:0}
+.toggle input{width:auto}
 .mail{display:grid;gap:8px}
 .mail-head{display:flex;align-items:center;justify-content:space-between;margin-top:8px;color:#8698ad;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .mail-body{background:#0e1420;border:1px solid #1b2433;border-radius:10px;padding:14px 16px;white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;color:#dbe5f0;margin:0}
 .mail-body.subj{font-weight:600}
-@media(max-width:720px){.ogrid{grid-template-columns:1fr}.tabs button{padding:7px 9px;font-size:12px}}
+@media(max-width:720px){.ogrid,.editor{grid-template-columns:1fr}.tabs button{padding:7px 9px;font-size:12px}.lead-meta{white-space:normal}}
 `;

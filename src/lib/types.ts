@@ -17,9 +17,12 @@ export type BusinessData = {
   hours: string[];
   social: Social[];
   nav: string[];
+  signals: string[];    // pitch ammo: what's wrong with the current site
   fetchedOk: boolean;
   note?: string;        // if scrape was partial / failed
 };
+
+export type LeadStatus = "new" | "contacted" | "interested" | "won" | "dead";
 
 export type Lead = {
   name: string;

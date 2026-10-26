@@ -29,7 +29,7 @@ export async function extractSite(input: string): Promise<BusinessData> {
 
   const base: BusinessData = {
     url, domain, name: domain, images: [], color: "#2563eb",
-    services: [], hours: [], social: [], nav: [], fetchedOk: false,
+    services: [], hours: [], social: [], nav: [], signals: [], fetchedOk: false,
   };
 
   let html = "";
@@ -130,6 +130,17 @@ export async function extractSite(input: string): Promise<BusinessData> {
     if (!social.find((s) => s.type === type)) social.push({ type, url: href });
   });
   base.social = social;
+
+  // pitch-strength signals: concrete reasons the current site needs help
+  const sig: string[] = [];
+  if (!/^https:/i.test(base.url)) sig.push("No HTTPS — browsers flag it “Not secure”");
+  if (!$('meta[name="viewport"]').length) sig.push("Not mobile-friendly (no responsive viewport)");
+  if (/<font\b|<center\b|<marquee\b|<frameset\b/i.test(html)) sig.push("Built with outdated HTML (pre-mobile era)");
+  if (/document\.write/i.test(html)) sig.push("Uses legacy scripting (document.write)");
+  if (!base.description) sig.push("Missing meta description (weak Google SEO)");
+  if (!base.heroImage) sig.push("No prominent hero image");
+  if (base.social.length === 0) sig.push("No linked social media");
+  base.signals = sig;
 
   base.fetchedOk = true;
   return base;
