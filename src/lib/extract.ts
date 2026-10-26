@@ -14,6 +14,35 @@ function abs(base: string, href?: string): string | undefined {
 }
 
 const NAV_SKIP = /^(home|about|about us|contact|contact us|menu|gallery|blog|news|login|sign in|cart|search|privacy|terms|faq)$/i;
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js)$|^[0-9]|sentry|example\.com|wixpress|@sentry|godaddy|squarespace|\.wix/i;
+
+async function fetchHtml(url: string): Promise<{ ok: boolean; html: string; finalUrl?: string; note?: string }> {
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 12000);
+    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, signal: ctrl.signal, redirect: "follow" });
+    clearTimeout(to);
+    if (!res.ok) return { ok: false, html: "", note: `Site returned HTTP ${res.status}.` };
+    return { ok: true, html: await res.text(), finalUrl: res.url || url };
+  } catch {
+    return { ok: false, html: "", note: "Could not reach the site (it may block bots or be offline)." };
+  }
+}
+
+/** All plausible contact emails from a page's HTML + mailto links, junk filtered. */
+function collectEmails($: cheerio.CheerioAPI, html: string): string[] {
+  const out = new Set<string>();
+  $('a[href^="mailto:"]').each((_, el) => {
+    const m = $(el).attr("href")!.replace(/^mailto:/i, "").split("?")[0].trim().toLowerCase();
+    if (m && !EMAIL_JUNK.test(m)) out.add(m);
+  });
+  for (const m of html.match(EMAIL_RE) || []) {
+    const e = m.toLowerCase();
+    if (!EMAIL_JUNK.test(e)) out.add(e);
+  }
+  return [...out];
+}
 
 /** Fetch a business site and pull out the bits we need to rebuild it. */
 export async function extractSite(input: string): Promise<BusinessData> {
@@ -29,18 +58,15 @@ export async function extractSite(input: string): Promise<BusinessData> {
 
   const base: BusinessData = {
     url, domain, name: domain, images: [], color: "#2563eb",
-    services: [], hours: [], social: [], nav: [], signals: [], fetchedOk: false,
+    services: [], hours: [], social: [], nav: [], signals: [], emails: [], fetchedOk: false,
   };
 
   let html = "";
   try {
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 12000);
-    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, signal: ctrl.signal, redirect: "follow" });
-    clearTimeout(to);
-    if (!res.ok) { base.note = `Site returned HTTP ${res.status}.`; return base; }
-    html = await res.text();
-    base.url = res.url || url;
+    const got = await fetchHtml(url);
+    if (!got.ok) { base.note = got.note; return base; }
+    html = got.html;
+    base.url = got.finalUrl || url;
   } catch (e) {
     base.note = "Could not reach the site (it may block bots or be offline).";
     return base;
@@ -108,9 +134,8 @@ export async function extractSite(input: string): Promise<BusinessData> {
   base.phone =
     $('a[href^="tel:"]').first().attr("href")?.replace("tel:", "").trim() ||
     bodyText.match(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0];
-  base.email =
-    $('a[href^="mailto:"]').first().attr("href")?.replace("mailto:", "").split("?")[0].trim() ||
-    bodyText.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0];
+  base.emails = collectEmails($, html);
+  base.email = base.emails[0];
   base.address =
     text("address") ||
     bodyText.match(/\d{1,5}\s+[A-Za-z0-9.\s]{3,40},?\s+[A-Za-z\s]{2,20},?\s+[A-Z]{2}\s+\d{5}/)?.[0];
@@ -141,6 +166,23 @@ export async function extractSite(input: string): Promise<BusinessData> {
   if (!base.heroImage) sig.push("No prominent hero image");
   if (base.social.length === 0) sig.push("No linked social media");
   base.signals = sig;
+
+  // owner-email finder: if the homepage had no email, check the contact / about page
+  if (!base.email) {
+    const link = $("a[href]").filter((_, el) =>
+      /contact|about|reach|get-?in-?touch/i.test((($(el).attr("href") || "") + " " + $(el).text()))).first().attr("href");
+    const curl = abs(base.url, link);
+    if (curl && curl !== base.url) {
+      const sub = await fetchHtml(curl);
+      if (sub.ok) {
+        const $$ = cheerio.load(sub.html);
+        base.emails = collectEmails($$, sub.html);
+        base.email = base.emails[0];
+      }
+    }
+  }
+  // last resort: a likely address to try (clearly a guess, surfaced as such in the UI)
+  if (!base.email) base.emailGuess = `info@${domain}`;
 
   base.fetchedOk = true;
   return base;

@@ -12,7 +12,9 @@ export type BusinessData = {
   color: string;        // brand accent, hex
   services: string[];
   phone?: string;
-  email?: string;
+  email?: string;        // best owner/contact email found
+  emails: string[];      // all distinct emails found (homepage + contact page)
+  emailGuess?: string;   // a likely address (info@domain) when none was found
   address?: string;
   hours: string[];
   social: Social[];

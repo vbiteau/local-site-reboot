@@ -35,7 +35,7 @@ ${name}${phone}`,
   }
 
   const signalLine = i.signal
-    ? ` I noticed your current site ${i.signal.charAt(0).toLowerCase() + i.signal.slice(1)}, so I`
+    ? ` I noticed an issue with your current site (${i.signal}), so I`
     : " I";
 
   return {

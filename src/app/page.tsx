@@ -267,6 +267,16 @@ export default function Home() {
           </div>
           <label className="toggle"><input type="checkbox" checked={oNoSite} onChange={(e) => setONoSite(e.target.checked)} /> They have no website (pitch a brand-new site)</label>
 
+          {(d?.email || d?.emailGuess) && (
+            <div className="recip">
+              <span>Send to</span>
+              <a href={`mailto:${d.email || d.emailGuess}`}>{d.email || d.emailGuess}</a>
+              {!d.email && <em>(guess — no email was published on the site)</em>}
+              <button className="mini" onClick={() => copy("to", (d.email || d.emailGuess)!)}>{copied === "to" ? "Copied!" : "Copy"}</button>
+              {d.emails && d.emails.length > 1 && <span className="more">+{d.emails.length - 1} more found</span>}
+            </div>
+          )}
+
           <div className="mail">
             <div className="mail-head"><b>Subject</b><button className="mini" onClick={() => copy("subject", mail.subject)}>{copied === "subject" ? "Copied!" : "Copy"}</button></div>
             <div className="mail-body subj">{mail.subject}</div>
@@ -397,6 +407,11 @@ button.primary:disabled{opacity:.6}
 .ogrid label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#9fb0c3;font-weight:600}
 .toggle{display:flex;align-items:center;gap:8px;color:#cdd8e5;font-size:14px;margin-bottom:18px;cursor:pointer}
 .toggle input{width:auto}
+.recip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0e1420;border:1px solid #1b2433;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+.recip>span{color:#8698ad;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.recip a{color:#6fb3ff;font-weight:700}
+.recip em{color:#f0a868;font-style:normal;font-size:12px}
+.recip .more{color:#8698ad;font-size:12px}
 .mail{display:grid;gap:8px}
 .mail-head{display:flex;align-items:center;justify-content:space-between;margin-top:8px;color:#8698ad;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .mail-body{background:#0e1420;border:1px solid #1b2433;border-radius:10px;padding:14px 16px;white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;color:#dbe5f0;margin:0}
