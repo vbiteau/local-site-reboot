@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Redesign from "@/components/Redesign";
 import RedesignBold from "@/components/RedesignBold";
+import RedesignTrade from "@/components/RedesignTrade";
 import { buildOutreach } from "@/lib/outreach";
 import type { BusinessData, Lead, LeadStatus } from "@/lib/types";
 
@@ -19,6 +20,8 @@ export default function Home() {
   const [leadLoading, setLeadLoading] = useState(false);
   const [leadErr, setLeadErr] = useState("");
   const [filter, setFilter] = useState<"all" | "none" | "has">("all");
+  const [catFilter, setCatFilter] = useState("all");
+  const [sort, setSort] = useState<"hot" | "az" | "cat">("hot");
 
   // lead pipeline (persisted) — stores the full lead so it survives across town searches
   type Saved = { lead: Lead; status: LeadStatus; notes: string };
@@ -42,7 +45,7 @@ export default function Home() {
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeErr, setScrapeErr] = useState("");
   const [view, setView] = useState<"after" | "before">("after");
-  const [template, setTemplate] = useState<"clean" | "bold">("clean");
+  const [template, setTemplate] = useState<"clean" | "bold" | "trade">("clean");
 
   // outreach
   const [oBiz, setOBiz] = useState("");
@@ -125,7 +128,14 @@ export default function Home() {
     downloadCsv(rows, "my-leads-pipeline.csv");
   }
 
-  const shown = leads?.filter((l) => filter === "all" ? true : filter === "none" ? !l.website : !!l.website) ?? [];
+  const cats = leads ? [...new Set(leads.map((l) => l.category))].sort() : [];
+  const shown = (leads ?? [])
+    .filter((l) => filter === "all" ? true : filter === "none" ? !l.website : !!l.website)
+    .filter((l) => catFilter === "all" || l.category === catFilter)
+    .sort((a, b) =>
+      sort === "az" ? a.name.localeCompare(b.name)
+      : sort === "cat" ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name)
+      : Number(!!a.website) - Number(!!b.website) || a.name.localeCompare(b.name));
   const hot = leads?.filter((l) => !l.website).length ?? 0;
   const savedList = Object.values(saved).filter((s) => s && s.lead).sort((a, b) => STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.lead.name.localeCompare(b.lead.name));
   const pipelineCount = savedList.length;
@@ -163,6 +173,15 @@ export default function Home() {
                   <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All</button>
                   <button className={filter === "none" ? "on" : ""} onClick={() => setFilter("none")}>🔥 No website</button>
                   <button className={filter === "has" ? "on" : ""} onClick={() => setFilter("has")}>Has website</button>
+                  <select className="sel" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+                    <option value="all">All categories</option>
+                    {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select className="sel" value={sort} onChange={(e) => setSort(e.target.value as "hot" | "az" | "cat")}>
+                    <option value="hot">Sort: hot first</option>
+                    <option value="az">Sort: A–Z</option>
+                    <option value="cat">Sort: category</option>
+                  </select>
                   <button className="csv" onClick={exportCsv}>⇩ CSV</button>
                 </div>
               </div>
@@ -174,7 +193,7 @@ export default function Home() {
                     <div className="lead" key={id}>
                       <div className="lead-row">
                         <div className="lead-main">
-                          <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>}</div>
+                          <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>} {saved[id] && <span className="saved" title="In your pipeline">★</span>}</div>
                           <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}</div>
                         </div>
                         <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(l, { status: e.target.value as LeadStatus })}>
@@ -225,6 +244,7 @@ export default function Home() {
                   <div className="seg sm">
                     <button className={template === "clean" ? "on" : ""} onClick={() => setTemplate("clean")}>Clean</button>
                     <button className={template === "bold" ? "on" : ""} onClick={() => setTemplate("bold")}>Bold</button>
+                    <button className={template === "trade" ? "on" : ""} onClick={() => setTemplate("trade")}>Trade</button>
                   </div>
                   <button className="mini" onClick={() => setEditing((v) => !v)}>{editing ? "Done editing" : "✎ Edit"}</button>
                   <button className="mini" onClick={downloadHtml}>⇩ Download HTML</button>
@@ -245,7 +265,7 @@ export default function Home() {
                 <div className="chrome"><span /><span /><span /><div className="addr">{view === "after" ? "your-new-site.com" : d.domain}</div></div>
                 <div className="screen">
                   {view === "after"
-                    ? (template === "bold" ? <RedesignBold d={d} /> : <Redesign d={d} />)
+                    ? (template === "bold" ? <RedesignBold d={d} /> : template === "trade" ? <RedesignTrade d={d} /> : <Redesign d={d} />)
                     : <iframe src={d.url} title="original" sandbox="allow-same-origin allow-scripts" />}
                 </div>
               </div>
@@ -367,6 +387,8 @@ button.primary:disabled{opacity:.6}
 .chips button{background:#0e1420;border:1px solid #243149;color:#9fb0c3;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer}
 .chips button.on{background:#13203a;color:#fff;border-color:#2f4a7a}
 .chips button.csv{color:#9bd3b0;border-color:#285c3e}
+.chips .sel{background:#0e1420;border:1px solid #243149;color:#9fb0c3;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:600}
+.saved{color:#ffd24a;font-size:13px}
 .leads{display:grid;gap:8px}
 .lead{background:#0e1420;border:1px solid #1b2433;border-radius:11px;padding:11px 14px}
 .lead-row{display:flex;align-items:center;gap:12px}
