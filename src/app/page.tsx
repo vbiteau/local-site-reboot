@@ -9,7 +9,7 @@ const STATUSES: LeadStatus[] = ["new", "contacted", "interested", "won", "dead"]
 const leadId = (l: Lead) => (l.name + "|" + (l.address || "")).toLowerCase();
 
 export default function Home() {
-  const [tab, setTab] = useState<"leads" | "redesign" | "outreach">("leads");
+  const [tab, setTab] = useState<"leads" | "pipeline" | "redesign" | "outreach">("leads");
 
   // lead finder
   const [city, setCity] = useState("");
@@ -20,17 +20,19 @@ export default function Home() {
   const [leadErr, setLeadErr] = useState("");
   const [filter, setFilter] = useState<"all" | "none" | "has">("all");
 
-  // lead pipeline (persisted)
-  const [saved, setSaved] = useState<Record<string, { status: LeadStatus; notes: string }>>({});
+  // lead pipeline (persisted) — stores the full lead so it survives across town searches
+  type Saved = { lead: Lead; status: LeadStatus; notes: string };
+  const [saved, setSaved] = useState<Record<string, Saved>>({});
   useEffect(() => { try { const s = localStorage.getItem("lsr-leads"); if (s) setSaved(JSON.parse(s)); } catch {} }, []);
-  function setLead(id: string, patch: Partial<{ status: LeadStatus; notes: string }>) {
+  function persistSaved(next: Record<string, Saved>) { try { localStorage.setItem("lsr-leads", JSON.stringify(next)); } catch {} return next; }
+  function setLead(lead: Lead, patch: Partial<{ status: LeadStatus; notes: string }>) {
+    const id = leadId(lead);
     setSaved((prev) => {
-      const cur = prev[id] || { status: "new" as LeadStatus, notes: "" };
-      const next = { ...prev, [id]: { ...cur, ...patch } };
-      try { localStorage.setItem("lsr-leads", JSON.stringify(next)); } catch {}
-      return next;
+      const cur = prev[id] || { lead, status: "new" as LeadStatus, notes: "" };
+      return persistSaved({ ...prev, [id]: { ...cur, lead, ...patch } });
     });
   }
+  function removeLead(id: string) { setSaved((prev) => { const n = { ...prev }; delete n[id]; return persistSaved(n); }); }
 
   // redesign
   const [url, setUrl] = useState("");
@@ -103,24 +105,30 @@ export default function Home() {
     URL.revokeObjectURL(a.href);
   }
 
+  function downloadCsv(rows: (string | undefined)[][], filename: string) {
+    const csv = rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
   function exportCsv() {
     if (!leads) return;
     const rows = [["name", "category", "website", "phone", "address", "status", "notes"]];
-    for (const l of leads) {
-      const s = saved[leadId(l)] || { status: "new", notes: "" };
-      rows.push([l.name, l.category, l.website || "", l.phone || "", l.address || "", s.status, s.notes]);
-    }
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `leads-${(area.split(",")[0] || "export").trim().replace(/\s+/g, "-").toLowerCase()}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    for (const l of leads) { const s = saved[leadId(l)]; rows.push([l.name, l.category, l.website || "", l.phone || "", l.address || "", s?.status || "new", s?.notes || ""]); }
+    downloadCsv(rows, `leads-${(area.split(",")[0] || "export").trim().replace(/\s+/g, "-").toLowerCase()}.csv`);
+  }
+  function exportPipelineCsv() {
+    const rows = [["name", "category", "website", "phone", "address", "status", "notes"]];
+    for (const s of savedList) { const l = s.lead; rows.push([l.name, l.category, l.website || "", l.phone || "", l.address || "", s.status, s.notes]); }
+    downloadCsv(rows, "my-leads-pipeline.csv");
   }
 
   const shown = leads?.filter((l) => filter === "all" ? true : filter === "none" ? !l.website : !!l.website) ?? [];
   const hot = leads?.filter((l) => !l.website).length ?? 0;
+  const savedList = Object.values(saved).filter((s) => s && s.lead).sort((a, b) => STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.lead.name.localeCompare(b.lead.name));
+  const pipelineCount = savedList.length;
   const mail = buildOutreach({ business: oBiz, yourName: oName, yourPhone: oPhone, previewUrl: oPreview, noSite: oNoSite, signal: !oNoSite ? d?.signals?.[0] : undefined });
 
   return (
@@ -131,6 +139,7 @@ export default function Home() {
           <button className={tab === "leads" ? "on" : ""} onClick={() => setTab("leads")}>1 · Find leads</button>
           <button className={tab === "redesign" ? "on" : ""} onClick={() => setTab("redesign")}>2 · Redesign</button>
           <button className={tab === "outreach" ? "on" : ""} onClick={() => setTab("outreach")}>3 · Outreach</button>
+          <button className={tab === "pipeline" ? "on" : ""} onClick={() => setTab("pipeline")}>★ My Leads{pipelineCount ? ` (${pipelineCount})` : ""}</button>
         </nav>
       </header>
 
@@ -168,14 +177,14 @@ export default function Home() {
                           <div className="lead-name">{l.name} {!l.website && <span className="hot">HOT LEAD</span>}</div>
                           <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}</div>
                         </div>
-                        <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(id, { status: e.target.value as LeadStatus })}>
+                        <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(l, { status: e.target.value as LeadStatus })}>
                           {STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
                         </select>
                         {l.website
-                          ? <button className="mini" onClick={() => generate(l.website)}>Redesign ↗</button>
-                          : <button className="mini warn" onClick={() => pitchNew(l)}>Pitch ✎</button>}
+                          ? <button className="mini" onClick={() => { setLead(l, {}); generate(l.website); }}>Redesign ↗</button>
+                          : <button className="mini warn" onClick={() => { setLead(l, {}); pitchNew(l); }}>Pitch ✎</button>}
                       </div>
-                      <input className="note" placeholder="notes…" value={s.notes} onChange={(e) => setLead(id, { notes: e.target.value })} />
+                      <input className="note" placeholder="notes…" value={s.notes} onChange={(e) => setLead(l, { notes: e.target.value })} />
                     </div>
                   );
                 })}
@@ -269,6 +278,52 @@ export default function Home() {
         </section>
       )}
 
+      {tab === "pipeline" && (
+        <section className="panel">
+          <div className="bar" style={{ marginTop: 0 }}>
+            <h1 style={{ margin: 0 }}>My leads</h1>
+            {savedList.length > 0 && <button className="csv" onClick={exportPipelineCsv}>⇩ Export CSV</button>}
+          </div>
+          <p className="sub">Every lead you've touched, across all your searches — your working pipeline.</p>
+
+          {savedList.length === 0 ? (
+            <p className="muted">No saved leads yet. Set a status or notes on a lead (or redesign/pitch one) and it lands here.</p>
+          ) : (
+            <>
+              <div className="pipe-summary">
+                {STATUSES.map((st) => {
+                  const n = savedList.filter((s) => s.status === st).length;
+                  return <span key={st} className={`pill stat-${st}`}>{n} {st}</span>;
+                })}
+              </div>
+              <div className="leads">
+                {savedList.map((s) => {
+                  const l = s.lead; const id = leadId(l);
+                  return (
+                    <div className="lead" key={id}>
+                      <div className="lead-row">
+                        <div className="lead-main">
+                          <div className="lead-name">{l.name} {!l.website && <span className="hot">NO SITE</span>}</div>
+                          <div className="lead-meta">{l.category}{l.address ? ` · ${l.address}` : ""}{l.phone ? ` · ${l.phone}` : ""}{l.website ? ` · ${l.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}` : ""}</div>
+                        </div>
+                        <select className={`stat stat-${s.status}`} value={s.status} onChange={(e) => setLead(l, { status: e.target.value as LeadStatus })}>
+                          {STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                        {l.website
+                          ? <button className="mini" onClick={() => generate(l.website)}>Redesign ↗</button>
+                          : <button className="mini warn" onClick={() => pitchNew(l)}>Pitch ✎</button>}
+                        <button className="rm" title="Remove from pipeline" onClick={() => removeLead(id)}>✕</button>
+                      </div>
+                      <input className="note" placeholder="notes…" value={s.notes} onChange={(e) => setLead(l, { notes: e.target.value })} />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       <style>{appCss}</style>
     </main>
   );
@@ -315,6 +370,10 @@ button.primary:disabled{opacity:.6}
 .mini{background:#1a2b4d;color:#bcd4ff;border:1px solid #2f4a7a;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer;font-size:13px;white-space:nowrap}
 .mini.warn{background:#3a2a12;color:#f0bd7f;border-color:#6a4a1f}
 .note{width:100%;margin-top:8px;background:#0b111c;border:1px dashed #243149;font-size:13px;padding:7px 10px}
+.pipe-summary{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+.pill{font-size:12px;font-weight:700;padding:5px 12px;border-radius:999px;border:1px solid #243149;background:#0e1420;text-transform:capitalize}
+.rm{background:transparent;border:1px solid #2a3344;color:#8698ad;border-radius:8px;padding:8px 11px;cursor:pointer;font-size:12px}
+.rm:hover{color:#ff7a7a;border-color:#5a2f28}
 .signals{background:#2a1512;border:1px solid #5a2f28;border-radius:11px;padding:12px 16px;margin-bottom:14px}
 .signals b{color:#ff9d7a;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
 .signals ul{margin:8px 0 0;padding-left:18px;color:#f0c7b8;font-size:14px;line-height:1.6}
